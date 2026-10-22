@@ -561,7 +561,37 @@
       return 'Kamera gagal dinyalakan.' + d;
     }
 
-    var camDetTimer = null;
+    var camDetTimer = null, camLoopTimer = null, camTick = 0;
+    /* Pembaca tambahan: tiap bingkai dipotong, diperbesar, dipertajam kontrasnya, dan dicoba juga versi terbalik
+       (mirror) dengan dua metode binarisasi. Membantu kamera laptop yang buram atau gambarnya terbalik. */
+    function startEnhancedLoop(token, hints) {
+      var Z = ZXing;
+      if (!(Z.HTMLCanvasElementLuminanceSource && Z.BinaryBitmap && Z.HybridBinarizer && Z.GlobalHistogramBinarizer && Z.MultiFormatReader)) return;
+      var mfr = new Z.MultiFormatReader(); mfr.setHints(hints);
+      var cv = document.createElement('canvas'), ctx = cv.getContext('2d', { willReadFrequently: true });
+      var v = $('cam-video');
+      var crops = [[0, 0, 1, 1, 1], [0.1, 0.25, 0.8, 0.5, 1.6], [0.2, 0.3, 0.6, 0.4, 2.2]];
+      var bins = [Z.HybridBinarizer, Z.GlobalHistogramBinarizer];
+      camTick = 0;
+      camLoopTimer = setInterval(function () {
+        if (token !== camToken || v.readyState < 2 || !v.videoWidth) return;
+        var n = camTick++, c = crops[n % 3], flip = (Math.floor(n / 3) % 2) === 1;
+        var W = v.videoWidth, H = v.videoHeight, sw = c[2] * W, sh = c[3] * H, sc = Math.min(c[4], 1600 / sw);
+        cv.width = Math.round(sw * sc); cv.height = Math.round(sh * sc);
+        ctx.save();
+        if (flip) { ctx.translate(cv.width, 0); ctx.scale(-1, 1); }
+        try { ctx.filter = 'grayscale(1) contrast(1.5)'; } catch (e) { /* abaikan */ }
+        ctx.drawImage(v, c[0] * W, c[1] * H, sw, sh, 0, 0, cv.width, cv.height);
+        ctx.restore();
+        var lum = new Z.HTMLCanvasElementLuminanceSource(cv);
+        for (var i = 0; i < bins.length; i++) {
+          try {
+            var r = mfr.decode(new Z.BinaryBitmap(new bins[i](lum)));
+            if (r) { onCamCode(r.getText()); return; }
+          } catch (e) { /* belum ada barcode di bingkai ini */ }
+        }
+      }, 140);
+    }
     function startDetector(token) {   // pembaca bawaan Chrome/Edge (lebih tahan buram); berjalan bersama ZXing
       if (!('BarcodeDetector' in window)) return;
       var det, v = $('cam-video');
@@ -573,6 +603,7 @@
     }
     function stopReader() {
       clearInterval(camDetTimer); camDetTimer = null;
+      clearInterval(camLoopTimer); camLoopTimer = null;
       try { if (camReader) camReader.reset(); } catch (e) { /* abaikan */ }
       camReader = null;
       var v = $('cam-video');
@@ -668,6 +699,7 @@
         if (!busy) showIdle();
         try { stream.getVideoTracks()[0].applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {}); } catch (x) { /* abaikan */ }
         startDetector(token);
+        startEnhancedLoop(token, hints);
         return reader.decodeFromStream(stream, $('cam-video'), function (result) {
           if (result) onCamCode(result.getText());   // galat "tidak ada barcode" sengaja diabaikan
         });
