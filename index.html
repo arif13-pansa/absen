@@ -490,15 +490,15 @@
       body.innerHTML = html.join('');
     }
 
-    function setConn(ok) {
+    function setConn(ok, detail) {
       $('conn-dot').className = 'inline-block w-2.5 h-2.5 rounded-full ' + (ok ? 'bg-emerald-400' : 'bg-rose-500 animate-pulse');
-      $('conn-text').textContent = ok ? 'Sistem Presensi Digital Barcode' : 'Koneksi terputus, mencoba lagi...';
+      $('conn-text').textContent = ok ? 'Sistem Presensi Digital Barcode' : 'Koneksi terputus' + (detail ? ' (' + detail + ')' : '') + ', mencoba lagi...';
     }
 
     function loadData() {
       google.script.run
         .withSuccessHandler(function (d) { setConn(true); renderData(d); })
-        .withFailureHandler(function () { setConn(false); })
+        .withFailureHandler(function (e) { setConn(false, e && e.message); })
         .getKioskData(KODE);
     }
 
