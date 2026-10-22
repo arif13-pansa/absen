@@ -6,12 +6,11 @@
   <title>Presensi SMP N 1 Pandak</title>
 
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" media="print" onload="this.media='all'">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
 
   <style>
     html, body { height: 100%; overflow: hidden; }
@@ -156,7 +155,7 @@
 
   <script>
     /* ===== PENGATURAN: tempel URL web app Apps Script (yang berakhiran /exec) ===== */
-    var API_URL = 'GANTI_DENGAN_URL_EXEC_ANDA';
+    var API_URL = 'https://script.google.com/macros/s/AKfycbx3_FKA74z4N8-ZIWnSQ_hlgaSxGYa06MkxrPxuxeNYzBrVSkdGO72qUJZoX0YQu0MJ/exec';
 
     var QS = new URLSearchParams(location.search);
     var KODE = (QS.get('kegiatan') || '').toUpperCase().replace(/[^A-Z0-9-]/g, '') || 'MASUK';
@@ -173,10 +172,17 @@
         FN.forEach(function (fn) {
           o[fn] = function () {
             var args = Array.prototype.slice.call(arguments);
-            fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ fn: fn, args: args }) })
-              .then(function (r) { return r.json(); })
-              .then(function (j) { if (!j.ok) throw new Error(j.error || 'Galat server'); if (ok) ok(j.data); })
-              .catch(function (e) { if (fail) fail(e); });
+            var body = JSON.stringify({ fn: fn, args: args });
+            function attempt(n) {   // coba ulang otomatis bila koneksi ke Apps Script gagal sesaat
+              fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body })
+                .then(function (r) { return r.json(); })
+                .then(function (j) { if (!j.ok) throw new Error(j.error || 'Galat server'); if (ok) ok(j.data); })
+                .catch(function (e) {
+                  if (e instanceof TypeError && n < 2) setTimeout(function () { attempt(n + 1); }, 1200);
+                  else if (fail) fail(e);
+                });
+            }
+            attempt(0);
           };
         });
         return o;
@@ -428,6 +434,7 @@
 
     /* ---------- DATA TERBARU ---------- */
     function renderData(d) {
+      if (d && !d.notFound && !d.inactive) { try { localStorage.setItem('kioskData_' + KODE, JSON.stringify(d)); } catch (e) { /* abaikan */ } }
       if (d.notFound) {
         kgBlocked = true; kgInfo = null;
         $('kg-nama').textContent = 'Kegiatan tidak ditemukan';
@@ -602,7 +609,15 @@
       stopReader();
       camShow(true);
       camMsg('');
-      if (typeof ZXing === 'undefined') { camMsg('Pustaka kamera (ZXing) gagal dimuat. Periksa koneksi internet lalu muat ulang halaman.'); return; }
+      if (typeof ZXing === 'undefined') {   // muat pustaka pembaca barcode hanya saat dibutuhkan
+        camStatus('Memuat pustaka kamera...');
+        var sc = document.createElement('script');
+        sc.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
+        sc.onload = function () { startCamera(deviceId); };
+        sc.onerror = function () { camMsg('Pustaka kamera (ZXing) gagal dimuat. Periksa koneksi internet lalu coba lagi.'); };
+        document.head.appendChild(sc);
+        return;
+      }
       if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         camMsg('Browser tidak mendukung kamera atau halaman tidak dibuka lewat https. Gunakan Chrome/Edge terbaru dan buka alamat /exec.');
         return;
@@ -662,7 +677,8 @@
     $('cam-video').addEventListener('playing', function () {
       camStarting = false;
       camMsg('');
-      camStatus('Arahkan barcode kartu ke kamera');
+      var vv = $('cam-video');
+      camStatus('Arahkan barcode ke kamera (' + vv.videoWidth + 'x' + vv.videoHeight + ('BarcodeDetector' in window ? ', BD' : ', ZX') + ')');
       fillCamDevices();
     });
 
@@ -694,6 +710,7 @@
     }
 
     showIdle();
+    try { var cached = JSON.parse(prefGet('kioskData_' + KODE) || 'null'); if (cached && cached.tanggal === new Date().toLocaleDateString('en-CA', { timeZone: TZ })) renderData(cached); } catch (e) { /* abaikan */ }
     loadData();
     setInterval(loadData, REFRESH_MS);
     if (PILIH) loadPilihan();
